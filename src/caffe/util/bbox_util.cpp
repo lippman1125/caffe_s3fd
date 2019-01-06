@@ -581,6 +581,12 @@ void DecodeBBoxesAll(const vector<LabelBBox>& all_loc_preds,
   }
 }
 
+
+bool overlap_cmp(const pair<int,float> &p1,const pair<int,float> &p2)
+{
+	return p1.second > p2.second;
+}
+
 void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
     const vector<NormalizedBBox>& pred_bboxes, const int label,
     const MatchType match_type, const float overlap_threshold,
@@ -612,7 +618,8 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
   if (num_gt == 0) {
     return;
   }
-
+  
+  vector<int> gt_boxnum(num_gt, 0);
   // Store the positive overlap between predictions and ground truth.
   map<int, map<int, float> > overlaps;
   for (int i = 0; i < num_pred; ++i) {
@@ -669,6 +676,7 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
       CHECK_EQ((*match_indices)[max_idx], -1);
       (*match_indices)[max_idx] = gt_indices[max_gt_idx];
       (*match_overlaps)[max_idx] = max_overlap;
+      gt_boxnum[max_gt_idx]++;
       // Erase the ground truth.
       gt_pool.erase(std::find(gt_pool.begin(), gt_pool.end(), max_gt_idx));
     }
@@ -679,6 +687,7 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
       // Already done.
       break;
     case MultiBoxLossParameter_MatchType_PER_PREDICTION:
+    {
       // Get most overlaped for the rest prediction bboxes.
       for (map<int, map<int, float> >::iterator it = overlaps.begin();
            it != overlaps.end(); ++it) {
@@ -708,8 +717,90 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
           CHECK_EQ((*match_indices)[i], -1);
           (*match_indices)[i] = gt_indices[max_gt_idx];
           (*match_overlaps)[i] = max_overlap;
+          gt_boxnum[max_gt_idx]++;
         }
       }
+      
+      /*
+      for (int i = 0; i < gt_indices.size(); i++) {
+        int gt_box_cnt = 0;
+        for (int j = 0; j < num_pred; j++) {
+          if ((*match_indices)[j] == gt_indices[i]) {
+            gt_box_cnt++;
+          }
+        }
+        printf("gt No.%d has %d bboxes, %d\n", i, gt_box_cnt, gt_boxnum[i]);
+      }
+      */
+      int tiny_gt_num = 0;
+      vector<int> tiny_gt_indices;
+      for (int i = 0; i < gt_indices.size(); i++) {
+          if (gt_boxnum[i] < 6) {
+            tiny_gt_indices.push_back(i);
+          }
+      }
+
+      // printf("___total gt = %ld, tiny gt = %ld\n", gt_indices.size(), tiny_gt_indices.size());
+      
+      tiny_gt_num = tiny_gt_indices.size();
+
+      if (tiny_gt_num > 0) {
+        vector< vector< pair<int, float> > > tiny_overlaps(tiny_gt_num);
+        // find tiny overlaps     
+        for (map<int, map<int, float> >::iterator it = overlaps.begin();
+             it != overlaps.end(); ++it) {
+          int i = it->first;
+          if ((*match_indices)[i] != -1) {
+            // The prediction already has matched ground truth or is ignored.
+            continue;
+          }
+          int max_gt_idx = -1;
+          float max_overlap = -1;
+          for (int j = 0; j < tiny_gt_num; ++j) {
+            if (it->second.find(tiny_gt_indices[j]) == it->second.end()) {
+              // No overlap between the i-th prediction and j-th ground truth.
+              continue;
+            }
+            // Find the maximum overlapped pair.
+            float overlap = it->second[tiny_gt_indices[j]];
+            if (overlap >= 0.1 && overlap > max_overlap) {
+              // If the prediction has not been matched to any ground truth,
+              // and the overlap is larger than maximum overlap, update.
+              max_gt_idx = j;
+              max_overlap = overlap;
+            }
+          }
+          if (max_gt_idx != -1) {
+            // Found a matched ground truth.
+            CHECK_EQ((*match_indices)[i], -1);
+            //(*match_indices)[i] = gt_indices[max_gt_idx];
+            //(*match_overlaps)[i] = max_overlap;
+            //gt_boxnum[max_gt_idx]++;
+            tiny_overlaps[max_gt_idx].push_back(pair<int, float>(i, max_overlap));
+          }
+        }
+      
+        int top_n = 6;
+        // sort overlap
+        for (int i = 0; i < tiny_gt_num; i++) {
+            vector<pair<int, float> > tiny_gt_v = tiny_overlaps[i];
+            sort(tiny_gt_v.begin(), tiny_gt_v.end(), overlap_cmp);
+            // printf("for tiny gt NO.%d ---- idx =  %d, total tiny gt num = %d\n", tiny_gt_indices[i], i, tiny_gt_num);
+            int k = 0;    
+            for (vector<pair<int, float> > ::iterator it=tiny_gt_v.begin(); it != tiny_gt_v.end(); it++) {
+                if (k++ < top_n) {
+                    if ((*match_indices)[it->first] == -1) {
+                        (*match_indices)[it->first] = tiny_gt_indices[i];
+                        (*match_overlaps)[it->first] = it->second;
+                        // printf("%d, idx=%d, overlap=%f\n", k, it->first, it->second);
+                    }
+                }        
+            }
+            // printf("@@@@@@@@@@@@@@@@@@\n");
+        }
+      }
+      // printf("_______________________________________\n");
+    }
       break;
     default:
       LOG(FATAL) << "Unknown matching type.";

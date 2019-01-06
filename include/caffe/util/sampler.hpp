@@ -20,6 +20,7 @@ bool SatisfySampleConstraint(const NormalizedBBox& sampled_bbox,
 
 // Sample a NormalizedBBox given the specifictions.
 void SampleBBox(const Sampler& sampler, NormalizedBBox* sampled_bbox);
+void SampleBBox_Square(const AnnotatedDatum& anno_datum, const Sampler& sampler, NormalizedBBox* sampled_bbox);
 
 // Generate samples from NormalizedBBox using the BatchSampler.
 void GenerateSamples(const NormalizedBBox& source_bbox,
@@ -27,10 +28,21 @@ void GenerateSamples(const NormalizedBBox& source_bbox,
                      const BatchSampler& batch_sampler,
                      vector<NormalizedBBox>* sampled_bboxes);
 
+void GenerateSamples_Square(const AnnotatedDatum& anno_datum,
+                     const NormalizedBBox& source_bbox,
+                     const vector<NormalizedBBox>& object_bboxes,
+                     const BatchSampler& batch_sampler,
+                     vector<NormalizedBBox>* sampled_bboxes);
+
+
 // Generate samples from AnnotatedDatum using the BatchSampler.
 // All sampled bboxes which satisfy the constraints defined in BatchSampler
 // is stored in sampled_bboxes.
 void GenerateBatchSamples(const AnnotatedDatum& anno_datum,
+                          const vector<BatchSampler>& batch_samplers,
+                          vector<NormalizedBBox>* sampled_bboxes);
+
+void GenerateBatchSamples_Square(const AnnotatedDatum& anno_datum,
                           const vector<BatchSampler>& batch_samplers,
                           vector<NormalizedBBox>* sampled_bboxes);
 

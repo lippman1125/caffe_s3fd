@@ -361,6 +361,9 @@ void DataTransformer<Dtype>::CropImage(const Datum& datum,
     CropImage(cv_img, bbox, &crop_img);
     // Save the image into datum.
     EncodeCVMatToDatum(crop_img, "jpg", crop_datum);
+    // if (crop_datum->height() != crop_datum->width()) {
+    //   printf("[%s][square] height=%d, width=%d\n", __func__, crop_datum->height(), crop_datum->width());
+    // }
     crop_datum->set_label(datum.label());
     return;
 #else

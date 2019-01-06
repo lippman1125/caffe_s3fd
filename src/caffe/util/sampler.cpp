@@ -117,6 +117,50 @@ void SampleBBox(const Sampler& sampler, NormalizedBBox* sampled_bbox) {
   sampled_bbox->set_ymax(h_off + bbox_height);
 }
 
+void SampleBBox_Square(const AnnotatedDatum& anno_datum, const Sampler& sampler, NormalizedBBox* sampled_bbox) {
+  // Get random scale.
+  CHECK_GE(sampler.max_scale(), sampler.min_scale());
+  CHECK_GT(sampler.min_scale(), 0.);
+  CHECK_LE(sampler.max_scale(), 1.);
+
+  const Datum datum = anno_datum.datum();
+
+  int datum_height = datum.height();
+  int datum_width = datum.width();
+  int min_side = datum_height;
+  float min_side_scale = 0.0;
+
+  min_side = datum_height > datum_width ? datum_width : datum_height;
+
+  // printf("height=%d, width=%d, min_side=%d\n", datum_height, datum_width, min_side);
+
+  float scale;
+  caffe_rng_uniform(1, sampler.min_scale(), sampler.max_scale(), &scale);
+  min_side_scale = min_side * scale;
+
+  // printf("scale=%f, min_side_scale = %f\n", scale, min_side_scale);
+
+  float bbox_width = min_side_scale/datum_width;
+  float bbox_height = min_side_scale/datum_height;
+  // printf("bbox_width=%f, bbox_height=%f\n", bbox_width, bbox_height);
+
+
+  // Figure out top left coordinates.
+  float w_off, h_off;
+  caffe_rng_uniform(1, 0.f, 1 - bbox_width, &w_off);
+  caffe_rng_uniform(1, 0.f, 1 - bbox_height, &h_off);
+
+  sampled_bbox->set_xmin(w_off);
+  sampled_bbox->set_ymin(h_off);
+  sampled_bbox->set_xmax(w_off + bbox_width);
+  sampled_bbox->set_ymax(h_off + bbox_height);
+
+  // printf("sampled_bbox:\n");
+  // printf("%0.6f, %0.6f, %0.6f, %0.6f\n", sampled_bbox->xmin(), sampled_bbox->ymin(), sampled_bbox->xmax(), sampled_bbox->ymax());
+}
+
+
+
 void GenerateSamples(const NormalizedBBox& source_bbox,
                      const vector<NormalizedBBox>& object_bboxes,
                      const BatchSampler& batch_sampler,
@@ -141,6 +185,32 @@ void GenerateSamples(const NormalizedBBox& source_bbox,
   }
 }
 
+void GenerateSamples_Square(const AnnotatedDatum& anno_datum,
+                     const NormalizedBBox& source_bbox,
+                     const vector<NormalizedBBox>& object_bboxes,
+                     const BatchSampler& batch_sampler,
+                     vector<NormalizedBBox>* sampled_bboxes) {
+  int found = 0;
+  for (int i = 0; i < batch_sampler.max_trials(); ++i) {
+    if (batch_sampler.has_max_sample() &&
+        found >= batch_sampler.max_sample()) {
+      break;
+    }
+    // Generate sampled_bbox in the normalized space [0, 1].
+    NormalizedBBox sampled_bbox;
+    SampleBBox_Square(anno_datum, batch_sampler.sampler(), &sampled_bbox);
+    // Transform the sampled_bbox w.r.t. source_bbox.
+    LocateBBox(source_bbox, sampled_bbox, &sampled_bbox);
+    // Determine if the sampled bbox is positive or negative by the constraint.
+    if (SatisfySampleConstraint(sampled_bbox, object_bboxes,
+                                batch_sampler.sample_constraint())) {
+      ++found;
+      sampled_bboxes->push_back(sampled_bbox);
+    }
+  }
+}
+
+
 void GenerateBatchSamples(const AnnotatedDatum& anno_datum,
                           const vector<BatchSampler>& batch_samplers,
                           vector<NormalizedBBox>* sampled_bboxes) {
@@ -155,6 +225,25 @@ void GenerateBatchSamples(const AnnotatedDatum& anno_datum,
       unit_bbox.set_xmax(1);
       unit_bbox.set_ymax(1);
       GenerateSamples(unit_bbox, object_bboxes, batch_samplers[i],
+                      sampled_bboxes);
+    }
+  }
+}
+
+void GenerateBatchSamples_Square(const AnnotatedDatum& anno_datum,
+                          const vector<BatchSampler>& batch_samplers,
+                          vector<NormalizedBBox>* sampled_bboxes) {
+  sampled_bboxes->clear();
+  vector<NormalizedBBox> object_bboxes;
+  GroupObjectBBoxes(anno_datum, &object_bboxes);
+  for (int i = 0; i < batch_samplers.size(); ++i) {
+    if (batch_samplers[i].use_original_image()) {
+      NormalizedBBox unit_bbox;
+      unit_bbox.set_xmin(0);
+      unit_bbox.set_ymin(0);
+      unit_bbox.set_xmax(1);
+      unit_bbox.set_ymax(1);
+      GenerateSamples_Square(anno_datum, unit_bbox, object_bboxes, batch_samplers[i],
                       sampled_bboxes);
     }
   }
